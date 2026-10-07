@@ -1,7 +1,10 @@
 """Each wrapper's parser, fed a small sample of the scanner's real output format."""
 import json
 
+import httpx
+
 from tools import nikto, nmap, nuclei, zap
+from tools.common import Target
 
 NMAP_XML = """<?xml version="1.0"?>
 <nmaprun><host><address addr="172.18.0.2" addrtype="ipv4"/><ports>
@@ -82,3 +85,26 @@ def test_nikto_dedupes_and_puts_the_path_in_the_title():
 def test_nikto_repairs_trailing_comma_from_a_time_boxed_run():
     broken = '[{"host": "t", "port": "80", "vulnerabilities": [{"id": "1", "url": "/", "msg": "x"},]}]'
     assert len(nikto.parse(broken)) == 1
+
+
+def fake_site(monkeypatch, handler):
+    """Make the Nikto wrapper's HTTP checks talk to a pretend website."""
+    real_client = httpx.Client
+    monkeypatch.setattr(nikto.httpx, "Client", lambda **_: real_client(transport=httpx.MockTransport(handler)))
+
+
+def test_nikto_marks_files_that_are_only_the_catch_all_page(monkeypatch):
+    # A single-page app answers every address with its home page; /ftp/ is the only real one here.
+    fake_site(monkeypatch, lambda request: httpx.Response(
+        200, text="real listing" if request.url.path == "/ftp/" else "<html>app</html>"))
+    findings = nikto.parse(NIKTO_JSON)
+    nikto.mark_false_alarms(findings, Target(url="http://t:3000"))
+    assert [f["likely_false_alarm"] for f in findings] == [False, True]
+
+
+def test_nikto_results_stand_when_the_site_returns_proper_404s(monkeypatch):
+    fake_site(monkeypatch, lambda request: httpx.Response(
+        200 if request.url.path in ("/ftp/", "/public/") else 404, text="page"))
+    findings = nikto.parse(NIKTO_JSON)
+    nikto.mark_false_alarms(findings, Target(url="http://t:3000"))
+    assert not any(f["likely_false_alarm"] for f in findings)

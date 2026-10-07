@@ -20,7 +20,7 @@ SPEC = {
     "name": "zap",
     "title": "OWASP ZAP baseline scan",
     "description": "Spiders the web app for about a minute and runs ZAP's passive rules on every "
-    "response: missing security headers, cookie flags, information leaks. No active attacks.",
+    "response: missing security headers, cookie flags, information leaks. No active attacks, no form submissions.",
     "typical_duration": "1 to 3 minutes",
 }
 
@@ -49,6 +49,9 @@ def run(target: Target, workdir: Path) -> dict:
                      replacement=target.basic_auth_header)
                 rule_added = True
             call("/JSON/spider/action/setOptionMaxDuration/", Integer=SPIDER_MINUTES)
+            # Look, do not touch: the spiders follow links and click, but never submit a form or type into one.
+            call("/JSON/spider/action/setOptionPostForm/", Boolean="false")
+            call("/JSON/ajaxSpider/action/setOptionRandomInputs/", Boolean="false")
             scan = call("/JSON/spider/action/scan/", url=target.url, recurse="true")["scan"]
 
             while int(call("/JSON/spider/view/status/", scanId=scan)["status"]) < 100:

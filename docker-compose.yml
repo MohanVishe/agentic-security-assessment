@@ -1,10 +1,10 @@
 name: agentic-security-assessment
 
-# One command brings up everything:  docker compose up --build
-#   UI        http://localhost:8501   (Streamlit)
-#   API       http://localhost:8000/docs
-#   Langflow  http://localhost:7860   (the agent flow, editable)
-#   Target    http://localhost:3001   (OWASP Juice Shop; scan it as http://juice-shop:3000)
+# One command brings up everything:  docker compose up -d --build
+#   Web page  http://localhost:8000        (start a check, read the report)
+#   API docs  http://localhost:8000/docs
+#   Langflow  http://localhost:7860        (the three agents on a canvas, editable)
+#   Target    http://localhost:3001        (OWASP Juice Shop; the scanners reach it as http://juice-shop:3000)
 # Published ports bind to 127.0.0.1 only. ZAP and the scanner service are not published at all.
 
 x-llm-env: &llm-env
@@ -15,17 +15,23 @@ x-llm-env: &llm-env
   LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
   LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-}
 
+# Optional tracing. Leave the keys empty and nothing is sent anywhere.
+x-langfuse-env: &langfuse-env
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+  LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+
 services:
   # --- the default demo target: deliberately vulnerable, yours to scan
   juice-shop:
-    image: bkimminich/juice-shop:latest
+    image: bkimminich/juice-shop:v20.2.0
     ports:
       - "127.0.0.1:${JUICE_SHOP_PORT:-3001}:3000"
     restart: unless-stopped
 
   # --- scanners
   zap:
-    image: ghcr.io/zaproxy/zaproxy:stable
+    image: ghcr.io/zaproxy/zaproxy:2.17.0
     # JVM heap and container memory are capped: the AJAX spider's headless browser is hungry.
     command: >
       zap.sh -Xmx1g -daemon -host 0.0.0.0 -port 8080
@@ -58,7 +64,7 @@ services:
     ports:
       - "127.0.0.1:7860:7860"
     environment:
-      <<: *llm-env
+      <<: [*llm-env, *langfuse-env]
       LANGFLOW_AUTO_LOGIN: "true"
       LANGFLOW_API_KEY_SOURCE: env
       LANGFLOW_API_KEY: ${LANGFLOW_API_KEY:-change-me-langflow-key}
@@ -75,33 +81,33 @@ services:
       - ./langflow/components:/app/custom_components:ro
       - ./langflow/agentlib:/app/agentlib:ro
     extra_hosts:
-      - "host.docker.internal:host-gateway"   # lets the agents reach a local Ollama
+      - "host.docker.internal:host-gateway"   # lets the agents reach a local Ollama or Langfuse
     restart: unless-stopped
 
-  # --- app
+  # --- API and web page
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "127.0.0.1:8000:8000"
     environment:
+      <<: *langfuse-env
       LANGFLOW_URL: http://langflow:7860
       LANGFLOW_API_KEY: ${LANGFLOW_API_KEY:-change-me-langflow-key}
+      SCANNERS_URL: http://scanners:8001
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-change-me-internal-token}
+      FRONTEND_DIR: /srv/frontend
+      # The page shows which model is in use and whether a key is set. The key itself is not passed in.
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      LLM_KEY_SET: ${LLM_API_KEY:+yes}
     volumes:
       - scan-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - langflow
       - scanners
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "127.0.0.1:8501:8501"
-    environment:
-      BACKEND_URL: http://backend:8000
-    depends_on:
-      - backend
     restart: unless-stopped
 
 volumes:

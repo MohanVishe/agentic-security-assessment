@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS events (
     scan_id TEXT NOT NULL,
     at TEXT NOT NULL,
     agent TEXT NOT NULL,
-    message TEXT NOT NULL
+    message TEXT NOT NULL,
+    data TEXT NOT NULL DEFAULT '{}'
 );
 """
 
@@ -97,17 +98,17 @@ def any_running() -> bool:
         return conn.execute("SELECT 1 FROM scans WHERE status='running'").fetchone() is not None
 
 
-def add_event(scan_id: str, agent: str, message: str) -> None:
+def add_event(scan_id: str, agent: str, message: str, data: dict | None = None) -> None:
     with connect() as conn:
-        conn.execute("INSERT INTO events (scan_id, at, agent, message) VALUES (?, ?, ?, ?)",
-                     (scan_id, now(), agent, message))
+        conn.execute("INSERT INTO events (scan_id, at, agent, message, data) VALUES (?, ?, ?, ?, ?)",
+                     (scan_id, now(), agent, message, json.dumps(data or {})))
 
 
 def get_events(scan_id: str) -> list[dict]:
     with connect() as conn:
-        rows = conn.execute("SELECT at, agent, message FROM events WHERE scan_id=? ORDER BY id",
+        rows = conn.execute("SELECT at, agent, message, data FROM events WHERE scan_id=? ORDER BY id",
                             (scan_id,)).fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) | {"data": json.loads(row["data"])} for row in rows]
 
 
 def _to_dict(row: sqlite3.Row) -> dict:

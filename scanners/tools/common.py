@@ -30,6 +30,12 @@ class Target:
         return urlparse(self.url).hostname or ""
 
     @property
+    def origin(self) -> str:
+        """Scheme, host and port, without any path."""
+        parsed = urlparse(self.url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    @property
     def port(self) -> int:
         parsed = urlparse(self.url)
         return parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -57,6 +63,7 @@ def finding(
     remediation: str = "",
     references: list[str] | None = None,
     instances: int = 1,
+    likely_false_alarm: bool = False,
 ) -> dict:
     return {
         "id": id,
@@ -72,6 +79,7 @@ def finding(
         "remediation": clip(remediation, 1200),
         "references": (references or [])[:5],
         "instances": instances,
+        "likely_false_alarm": likely_false_alarm,
     }
 
 

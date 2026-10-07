@@ -7,9 +7,9 @@ What was checked before the build (October 2026) and the decision each finding l
 | Tool | How it runs here | Output used | Notes |
 |---|---|---|---|
 | nmap | `nmap -Pn -sT -sV -T4 -p <top 100 + target port> -oX -` | XML, parsed with the standard library | `-sT` (connect scan) needs no raw sockets, so the container runs unprivileged. nmap has no JSON output. |
-| OWASP ZAP | Daemon container, driven over its REST API: new session, spider, AJAX spider, wait for the passive scanner, read alerts | JSON alerts (`/JSON/alert/view/alerts/`) | Equivalent to `zap-baseline.py -j`: no active attacks. The AJAX spider matters for single-page apps: on Juice Shop the plain spider found 4 alert types, with the AJAX spider 9. |
-| Nuclei | `nuclei -u <url> -jsonl -o <file> -t http/technologies -t http/misconfiguration -t http/exposures -t http/exposed-panels -exclude-tags intrusive,dos,fuzz,brute-force,default-login` | JSON Lines, one result per line | Results are written as they are found, so a timed-out run still yields findings. Some templates carry a CVSS score and vector under `info.classification`. |
-| Nikto | `nikto.pl -h <url> -Format json -maxtime 120s -nointeractive` | JSON | Needs Perl with `Net::SSLeay` and `XML::Writer`. Does not rate findings. A run cut off by `-maxtime` can leave a trailing comma, which the parser repairs. |
+| OWASP ZAP | Daemon container, driven over its REST API: new session, spider, AJAX spider, wait for the passive scanner, read alerts. Form posting and random form input are switched off | JSON alerts (`/JSON/alert/view/alerts/`) | Equivalent to `zap-baseline.py -j`: no active attacks. The AJAX spider matters for single-page apps: on Juice Shop the plain spider found 4 alert types, with the AJAX spider 9. |
+| Nuclei | `nuclei -u <url> -jsonl -o <file> -rate-limit 40 -t http/technologies -t http/misconfiguration -t http/exposures -t http/exposed-panels -exclude-tags intrusive,dos,fuzz,brute-force,default-login` | JSON Lines, one result per line | Results are written as they are found, so a timed-out run still yields findings. Some templates carry a CVSS score and vector under `info.classification`. |
+| Nikto | `nikto.pl -h <url> -Format json -Tuning 123be -Pause 0.03 -maxtime 150s -nointeractive` | JSON | Needs Perl with `Net::SSLeay` and `XML::Writer`. Does not rate findings. `-Tuning 123be` keeps only the detection test classes (files, misconfiguration, information disclosure, software identification, admin consoles) and leaves out injection, command execution, SQL injection, upload and denial-of-service tests. A run cut off by `-maxtime` can leave a trailing comma, which the parser repairs. |
 
 Sources: [ZAP baseline scan](https://www.zaproxy.org/docs/docker/baseline-scan/), [ZAP API](https://www.zaproxy.org/docs/api/), [Nuclei docs](https://docs.projectdiscovery.io/opensource/nuclei/overview), [Nikto](https://github.com/sullo/nikto), [nmap reference](https://nmap.org/book/man.html).
 
@@ -57,3 +57,19 @@ Sources: [CVSS v3.1 specification](https://www.first.org/cvss/v3-1/specification
 Sources: [PentestGPT paper](https://arxiv.org/abs/2308.06782), [PentestGPT](https://github.com/GreyDGL/PentestGPT), [PentAGI](https://github.com/vxcontrol/pentagi), [OWASP LLM01 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/).
 
 **Decision:** Planner / Executor / Reporter, with the target and the authorization check held outside the LLM in the tool service.
+
+## What testing on the practice site taught (added during the build)
+
+- **Scan load can take a target down.** Stock Juice Shop keeps memory for requests to addresses that do not exist and falls behind when they arrive faster than it can clear them (the same growth was measured on v19.2.1, v20.0.0 and v20.2.0). On v20.2.0, about 5,000 such requests in one unbroken burst ended in "JavaScript heap out of memory". Nikto unthrottled sends about 70 requests a second and Nuclei about 40, so the two back to back crashed it, and the next scanner then reported zero findings on a dead site. The same number of requests with pauses in between did no harm.
+- **Decision:** throttle Nikto (`-Pause 0.03`), cap Nuclei at 40 requests a second, pause 15 seconds between tools, check that the target answers before and after every tool, and report it when it does not. With these in place a full four-tool run peaks at about 550 MB in the Juice Shop container instead of 2 GB.
+- **Single-page apps fool file checks.** Juice Shop returns its home page with status 200 for any address, so Nikto reports files such as `/.htpasswd` that do not exist. **Decision:** one plain GET per path finding, compared with a made-up address; identical pages mark the finding as a likely false alarm.
+- **A model's closing words are not evidence.** `openai/gpt-oss-120b` once stopped after three of four planned tools and wrote that all four had completed. **Decision:** code compares the plan with what ran, reminds the model once, and the report shows facts from the tool runs, not the model's summary of them.
+
+## Tracing: Langflow with Langfuse
+
+- Langflow has built-in Langfuse tracing. Setting `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_HOST` on the Langflow container is enough: one trace per flow run, one span per component, and the run's `session_id` becomes the Langfuse session.
+- `self.get_langchain_callbacks()` inside a component returns a handler that files LangChain work under the component's span. It attaches to the most recently opened span, so it has to be fetched right before the call, not at the top of the method.
+- A bare LLM call is nested correctly. A bare tool call is not, so the Executor's loop runs inside one `RunnableLambda`; the LLM turns and tool runs then nest under it.
+- Langfuse v4 (self-hosted, events-only mode) no longer serves `GET /api/public/traces`. Looking a run up by session works through `GET /api/public/v2/observations?sessionId=...`; scores are still written with `POST /api/public/scores` and read with `GET /api/public/v3/scores`. The backend tries the new endpoint first and falls back to the old one.
+
+Sources: [Langflow: Langfuse integration](https://docs.langflow.org/integrations-langfuse), [Langfuse public API](https://api.reference.langfuse.com/).

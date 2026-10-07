@@ -1,15 +1,18 @@
-"""Regenerate flows/security_assessment.json from the component code.
+"""Regenerate the flow files under flows/ from the component code.
 
-The flow file embeds a copy of each component's code and field definitions, so
-it must be rebuilt after editing anything under components/. With the stack up:
+A flow file embeds a copy of each component's code and field definitions, so
+the files must be rebuilt after editing anything under components/. With the
+stack up:
 
+    docker compose restart langflow      # so Langflow loads the edited components
     python langflow/build_flow.py
-    docker compose restart langflow
+    docker compose restart langflow      # so Langflow loads the rebuilt flows
 
 It asks the running Langflow for its component catalog (which includes the three
-custom agents), then wires five nodes in a line:
+custom agents), then wires the nodes of each flow in a line:
 
-    Chat Input -> Planner Agent -> Executor Agent -> Reporter Agent -> Chat Output
+    security_assessment.json   Chat Input -> Planner -> Executor -> Reporter -> Chat Output
+    planner_only.json          Chat Input -> Planner -> Chat Output   (used by evals/)
 
 You can do the same by hand in the Langflow canvas and export the flow; this
 script just makes the result reproducible.
@@ -36,16 +39,39 @@ def api_key() -> str:
                 return line.split("=", 1)[1].strip()
     return "change-me-langflow-key"
 
-OUT_FILE = Path(__file__).parent / "flows" / "security_assessment.json"
-FLOW_ID = "5ec0a55e-55a1-4f10-9a11-a6e17c5ec001"  # fixed, so reloading updates the flow in place
+FLOWS_DIR = Path(__file__).parent / "flows"
 
-# (node id, component name in the catalog, input field that receives the previous node's output)
-CHAIN = [
-    ("ChatInput-req01", "ChatInput", None),
-    ("PlannerAgent-pln01", "PlannerAgent", "request"),
-    ("ExecutorAgent-exe01", "ExecutorAgent", "plan"),
-    ("ReporterAgent-rep01", "ReporterAgent", "results"),
-    ("ChatOutput-out01", "ChatOutput", "input_value"),
+# Each flow is a chain of (node id, component name in the catalog, input field that receives
+# the previous node's output). The ids are fixed, so reloading updates a flow in place.
+FLOWS = [
+    {
+        "file": "security_assessment.json",
+        "id": "5ec0a55e-55a1-4f10-9a11-a6e17c5ec001",
+        "name": "Security Assessment",
+        "endpoint_name": "security-assessment",
+        "description": "Planner -> Executor -> Reporter. Plans a detection-only assessment of an "
+                       "authorized web target, runs open-source scanners, writes a findings report.",
+        "chain": [
+            ("ChatInput-req01", "ChatInput", None),
+            ("PlannerAgent-pln01", "PlannerAgent", "request"),
+            ("ExecutorAgent-exe01", "ExecutorAgent", "plan"),
+            ("ReporterAgent-rep01", "ReporterAgent", "results"),
+            ("ChatOutput-out01", "ChatOutput", "input_value"),
+        ],
+    },
+    {
+        "file": "planner_only.json",
+        "id": "5ec0a55e-55a1-4f10-9a11-a6e17c5ec002",
+        "name": "Security Assessment - Planner only",
+        "endpoint_name": "security-assessment-plan",
+        "description": "Only the Planner: returns the plan and runs no scanner. "
+                       "Used by evals/ to test the Planner's decisions.",
+        "chain": [
+            ("ChatInput-req01", "ChatInput", None),
+            ("PlannerAgent-pln01", "PlannerAgent", "request"),
+            ("ChatOutput-out01", "ChatOutput", "input_value"),
+        ],
+    },
 ]
 
 
@@ -70,10 +96,10 @@ def handle(value: dict) -> str:
     return json.dumps(value, separators=(",", ":")).replace('"', "œ")
 
 
-def build() -> dict:
-    components = catalog()
+def build(flow: dict, components: dict) -> dict:
+    chain = flow["chain"]
     nodes, edges = [], []
-    for index, (node_id, name, _) in enumerate(CHAIN):
+    for index, (node_id, name, _) in enumerate(chain):
         component = components[name]
         nodes.append({
             "id": node_id,
@@ -84,7 +110,7 @@ def build() -> dict:
                      "selected_output": component["outputs"][0]["name"]},
         })
 
-    for (source_id, source_name, _), (target_id, target_name, field) in zip(CHAIN, CHAIN[1:]):
+    for (source_id, source_name, _), (target_id, target_name, field) in zip(chain, chain[1:]):
         output = components[source_name]["outputs"][0]
         target_field = components[target_name]["template"][field]
         source = {"dataType": source_name, "id": source_id, "name": output["name"],
@@ -100,11 +126,10 @@ def build() -> dict:
         })
 
     return {
-        "id": FLOW_ID,
-        "name": "Security Assessment",
-        "description": "Planner -> Executor -> Reporter. Plans a detection-only assessment of an "
-                       "authorized web target, runs open-source scanners, writes a findings report.",
-        "endpoint_name": "security-assessment",
+        "id": flow["id"],
+        "name": flow["name"],
+        "description": flow["description"],
+        "endpoint_name": flow["endpoint_name"],
         "is_component": False,
         "tags": ["agents", "security"],
         "data": {"nodes": nodes, "edges": edges, "viewport": {"x": 0, "y": 0, "zoom": 0.6}},
@@ -112,6 +137,9 @@ def build() -> dict:
 
 
 if __name__ == "__main__":
-    OUT_FILE.parent.mkdir(exist_ok=True)
-    OUT_FILE.write_text(json.dumps(build(), indent=1, ensure_ascii=False), encoding="utf-8")
-    print(f"Wrote {OUT_FILE}")
+    FLOWS_DIR.mkdir(exist_ok=True)
+    components = catalog()
+    for flow in FLOWS:
+        out_file = FLOWS_DIR / flow["file"]
+        out_file.write_text(json.dumps(build(flow, components), indent=1, ensure_ascii=False), encoding="utf-8", newline="\n")
+        print(f"Wrote {out_file}")

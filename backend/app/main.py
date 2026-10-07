@@ -7,6 +7,8 @@ Life of a scan:  created -> authorized -> running -> completed | failed
     POST /api/scans/{id}/start       start the assessment (refused until authorized)
     GET  /api/scans/{id}             poll status and live events
     GET  /api/scans/{id}/report      fetch the report (.json, .md or .pdf)
+
+It also serves the web page (the files in frontend/) at "/".
 """
 from __future__ import annotations
 
@@ -20,16 +22,21 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db, report
+from . import db, evaluation, report
 
 LANGFLOW_URL = os.getenv("LANGFLOW_URL", "http://langflow:7860")
 LANGFLOW_API_KEY = os.getenv("LANGFLOW_API_KEY", "")
 LANGFLOW_FLOW = os.getenv("LANGFLOW_FLOW", "security-assessment")
+SCANNERS_URL = os.getenv("SCANNERS_URL", "http://scanners:8001")
 INTERNAL_TOKEN = os.getenv("INTERNAL_TOKEN", "")
 RUN_TIMEOUT = int(os.getenv("ASSESSMENT_TIMEOUT_SECONDS", "2400"))
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", "/srv/frontend"))
+LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_KEY_SET = bool(os.getenv("LLM_KEY_SET", ""))  # "yes" when LLM_API_KEY is filled in; the key itself stays out
 
 AUTHORIZATION_STATEMENT = (
     "I confirm that I own this target or have written authorization from its owner to run a "
@@ -39,18 +46,20 @@ AUTHORIZATION_STATEMENT = (
 # Targets that are safe to scan out of the box. The checkbox is still required for them:
 # the person running the tool is the one who vouches for every scan.
 DEMO_TARGETS = [
-    {"name": "OWASP Juice Shop (local container)", "url": "http://juice-shop:3000",
-     "note": "Deliberately vulnerable app started by docker-compose. It is yours, so it is in scope."},
-    {"name": "Acunetix test site (public)", "url": "http://testphp.vulnweb.com",
-     "note": "Published by Acunetix for testing web scanners."},
+    {"name": "OWASP Juice Shop", "url": "http://juice-shop:3000", "badge": "runs on your machine",
+     "note": "A practice shop website with security holes built in on purpose. "
+             "It was started with this project, so it is yours to scan."},
+    {"name": "Acunetix test site", "url": "http://testphp.vulnweb.com", "badge": "public test site",
+     "note": "A public website that Acunetix keeps online so people can try security scanners on it."},
 ]
 
 # The stack's own services and cloud metadata addresses are never valid targets.
-BLOCKED_HOSTS = {"langflow", "backend", "frontend", "scanners", "zap", "metadata.google.internal"}
+BLOCKED_HOSTS = {"langflow", "backend", "scanners", "zap", "metadata.google.internal"}
 
 # Test credentials live in memory only for the length of the run. They are never written to
 # the database, never logged and never sent to the LLM.
 CREDENTIALS: dict[str, tuple[str, str]] = {}
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -59,6 +68,20 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Agentic Security Assessment API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """The page shows text that came from scanned websites, so scripts are locked to our own files."""
+    response = await call_next(request)
+    if not request.url.path.startswith(("/docs", "/openapi.json")):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 class ScanRequest(BaseModel):
@@ -76,6 +99,7 @@ class AuthorizationRequest(BaseModel):
 class Event(BaseModel):
     agent: str = Field(max_length=40)
     message: str = Field(max_length=2000)
+    data: dict = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- public API
@@ -88,6 +112,17 @@ def health() -> dict:
 @app.get("/api/config")
 def config() -> dict:
     return {"demo_targets": DEMO_TARGETS, "authorization_statement": AUTHORIZATION_STATEMENT}
+
+
+@app.get("/api/status")
+def status() -> dict:
+    """Is every part of the stack up? The page shows this and holds the start button until it is."""
+    langflow = _is_up(f"{LANGFLOW_URL}/health")
+    scanners = _get_json(f"{SCANNERS_URL}/health")
+    services = {"langflow": langflow, "scanners": bool(scanners), "zap": bool(scanners.get("zap_ready"))}
+    return {"ready": all(services.values()) and LLM_KEY_SET, "services": services,
+            "llm": {"model": LLM_MODEL, "key_set": LLM_KEY_SET},
+            "tracing": evaluation.tracing_enabled()}
 
 
 @app.post("/api/scans", status_code=201)
@@ -127,7 +162,7 @@ def start_assessment(scan_id: str, background: BackgroundTasks) -> dict:
     if db.any_running():
         raise HTTPException(409, "Another assessment is running. Wait for it to finish.")
     db.update_scan(scan_id, status="running", started_at=db.now())
-    db.add_event(scan_id, "system", "Assessment started; handing over to the Langflow agents.")
+    db.add_event(scan_id, "system", "Assessment started; handing over to the agents.")
     background.add_task(run_assessment, scan_id)
     return public_view(db.get_scan(scan_id))
 
@@ -193,7 +228,7 @@ def authorization_record(scan_id: str) -> dict:
 @app.post("/internal/scans/{scan_id}/events", dependencies=[Depends(internal)])
 def add_event(scan_id: str, event: Event) -> dict:
     require_scan(scan_id)
-    db.add_event(scan_id, event.agent, event.message)
+    db.add_event(scan_id, event.agent, event.message, event.data)
     return {"ok": True}
 
 
@@ -206,7 +241,6 @@ def run_assessment(scan_id: str) -> None:
         "scan_id": scan_id,
         "target_url": scan["target_url"],
         "scope_notes": scan["scope_notes"],
-        "credentials_provided": scan["credentials_provided"],
     }
     try:
         response = httpx.post(
@@ -223,6 +257,11 @@ def run_assessment(scan_id: str) -> None:
         result = json.loads(text)
         if "findings" not in result:
             raise RuntimeError(f"The flow did not return a report: {text[:300]}")
+
+        # Check the finished report against the raw scanner output, and attach the scores to the trace.
+        result["quality_checks"] = evaluation.evaluate(result, DATA_DIR / "raw" / scan_id)
+        result["trace_url"] = evaluation.send_to_langfuse(scan_id, result["quality_checks"])
+
         db.update_scan(scan_id, status="completed", finished_at=db.now(), report=result)
         db.add_event(scan_id, "system", "Assessment completed. Report is ready.")
     except Exception as exc:  # anything that goes wrong must end up on the scan record
@@ -279,3 +318,23 @@ def require_report(scan_id: str) -> dict:
 
 def public_view(scan: dict) -> dict:
     return {key: value for key, value in scan.items() if key != "report"} | {"has_report": bool(scan["report"])}
+
+
+def _is_up(url: str) -> bool:
+    try:
+        return httpx.get(url, timeout=4).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _get_json(url: str) -> dict:
+    try:
+        response = httpx.get(url, timeout=8)
+        return response.json() if response.status_code == 200 else {}
+    except (httpx.HTTPError, ValueError):
+        return {}
+
+
+# The web page. Mounted last so it never shadows an API route.
+if FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

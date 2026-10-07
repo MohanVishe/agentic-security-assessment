@@ -85,3 +85,24 @@ def test_report_is_404_until_the_scan_completes(client):
     scan_id = submit(client).json()["id"]
     assert client.get(f"/api/scans/{scan_id}/report").status_code == 404
     assert client.get("/api/scans/not-a-real-id").status_code == 404
+
+
+def test_agent_events_keep_their_structured_data(client):
+    scan_id = submit(client).json()["id"]
+    client.post(f"/internal/scans/{scan_id}/events", headers=INTERNAL,
+                json={"agent": "planner", "message": "Plan: zap.", "data": {"type": "plan", "steps": [{"tool": "zap"}]}})
+    event = client.get(f"/api/scans/{scan_id}").json()["events"][-1]
+    assert event["agent"] == "planner" and event["data"]["steps"] == [{"tool": "zap"}]
+
+
+def test_responses_carry_a_content_security_policy(client):
+    policy = client.get("/api/health").headers["Content-Security-Policy"]
+    assert "default-src 'self'" in policy and "script-src" not in policy  # so scripts are 'self' only
+
+
+def test_status_says_what_is_not_ready(client, monkeypatch):
+    monkeypatch.setattr(main, "_is_up", lambda url: False)
+    monkeypatch.setattr(main, "_get_json", lambda url: {})
+    status = client.get("/api/status").json()
+    assert status["ready"] is False
+    assert status["services"] == {"langflow": False, "scanners": False, "zap": False}

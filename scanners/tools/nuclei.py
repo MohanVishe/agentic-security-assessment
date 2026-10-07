@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .common import Target, finding, run_command
@@ -17,6 +18,7 @@ SPEC = {
 TEMPLATES = ["http/technologies", "http/misconfiguration", "http/exposures", "http/exposed-panels"]
 EXCLUDED_TAGS = "intrusive,dos,fuzz,brute-force,default-login"
 TIMEOUT = 360
+RATE_LIMIT = os.getenv("NUCLEI_RATE_LIMIT", "40")  # requests per second, kept gentle on purpose
 
 
 def run(target: Target, workdir: Path) -> dict:
@@ -24,7 +26,7 @@ def run(target: Target, workdir: Path) -> dict:
     out_file.unlink(missing_ok=True)
     cmd = ["nuclei", "-u", target.url, "-jsonl", "-o", str(out_file), "-silent", "-no-color",
            "-disable-update-check", "-no-interactsh", "-omit-raw",
-           "-rate-limit", "50", "-timeout", "5", "-retries", "0",
+           "-rate-limit", RATE_LIMIT, "-timeout", "5", "-retries", "0",
            "-exclude-tags", EXCLUDED_TAGS]
     for folder in TEMPLATES:
         cmd += ["-t", folder]

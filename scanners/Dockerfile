@@ -1,4 +1,4 @@
-FROM projectdiscovery/nuclei:latest AS nuclei
+FROM projectdiscovery/nuclei:v3.11.1 AS nuclei
 
 FROM python:3.12-slim
 
