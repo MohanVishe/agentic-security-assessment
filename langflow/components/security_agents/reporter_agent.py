@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from agent_common import chat_json, notify, tracing
+from agent_common import chat_json, model_for, notify, tracing
 from lfx.custom.custom_component.component import Component
 from lfx.io import MessageTextInput, MultilineInput, Output, StrInput
 from lfx.schema.message import Message
@@ -87,7 +87,7 @@ class ReporterAgent(Component):
         MessageTextInput(name="results", display_name="Tool Results", info="Output of the Executor Agent."),
         MultilineInput(name="instructions", display_name="Instructions", value=REPORTER_PROMPT),
         StrInput(name="model_name", display_name="Model (optional)", value="",
-                 info="Leave empty to use LLM_MODEL from .env."),
+                 info="Leave empty to use LLM_MODEL_REPORTER, or else LLM_MODEL, from .env."),
     ]
     outputs = [Output(display_name="Report", name="report", method="write_report")]
 
@@ -121,7 +121,7 @@ class ReporterAgent(Component):
                         "findings": [{"id": f["id"], "tool": f["tool"], "severity": f["severity"],
                                       "title": f["title"][:120]} for f in findings[:MAX_FINDINGS_FOR_LLM]],
                     })},
-                ], config=tracing(self), model=self.model_name, max_tokens=3000)
+                ], config=tracing(self), model=model_for("reporter", self.model_name), max_tokens=3000)
 
                 # Everything the model wrote is attached by finding ID. An ID that does not
                 # exist is dropped, so the model cannot add a finding of its own.

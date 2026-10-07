@@ -6,6 +6,8 @@ short: this file is mounted into the Langflow container and put on PYTHONPATH.
 The LLM is any OpenAI-compatible chat endpoint (Groq, Gemini, OpenRouter,
 Ollama...). Set LLM_BASE_URL / LLM_API_KEY / LLM_MODEL, and optionally the
 same three with an LLM_FALLBACK_ prefix for when the first one is rate limited.
+One agent can use a different model from the same provider: LLM_MODEL_PLANNER,
+LLM_MODEL_EXECUTOR, LLM_MODEL_REPORTER.
 
 Every call goes through LangChain with the callbacks Langflow hands to the
 component, which is what makes each LLM turn and tool run appear in Langfuse.
@@ -40,6 +42,11 @@ def providers(model_override: str = "") -> list[dict]:
             found.append({"base_url": base_url, "model": model,
                           "api_key": os.getenv(f"{prefix}_API_KEY") or "not-needed"})
     return found
+
+
+def model_for(agent: str, chosen_on_canvas: str = "") -> str:
+    """The model one agent asks for: its canvas field, else LLM_MODEL_<AGENT>, else "" (meaning LLM_MODEL)."""
+    return chosen_on_canvas or os.getenv(f"LLM_MODEL_{agent.upper()}", "")
 
 
 def tracing(component) -> dict:

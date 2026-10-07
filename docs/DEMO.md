@@ -13,7 +13,7 @@ This page walks through one real run, step by step, with screenshots. Nothing he
 | **AI usage** | 7 questions to the model, 8,593 tokens in total |
 | **The report itself** | [Markdown](sample-report/report.md) · [PDF](sample-report/report.pdf) · [JSON](sample-report/report.json) |
 
-New to the project? Read ["What this is, in plain words"](../README.md#1-what-this-is-in-plain-words) first.
+New to the project? Read ["Pen testing in plain words"](../README.md#1-pen-testing-in-plain-words) first.
 
 ---
 
@@ -164,8 +164,11 @@ The same pipeline was run with the other models available on Groq's free tier.
 | `qwen/qwen3.8-27b` | Web application checks only. Do not port scan. | zap, nuclei | 22 | all 1.0 |
 | `openai/gpt-oss-20b` | Only check which ports are open. No web scanning. | nmap | 1 | all 1.0 |
 | `openai/gpt-oss-20b` | Web application checks only. Do not port scan. | zap, nuclei | 21 | all 1.0 |
+| `openai/gpt-oss-20b` for Planner and Executor, `openai/gpt-oss-120b` for Reporter | Full baseline check, including web server checks. | nmap, zap, nuclei, nikto | 32 | all 1.0 |
 
 All three models also pass the 12-case Planner test set ([results](../evals/results.md)).
+
+The last row uses a different model per agent: a small, fast one plans and runs the tools, and the larger one writes the report. In that run the small model answered after the third tool without calling the fourth. Code noticed the missing tool and reminded it once, and it then ran Nikto. That is one of the [guard rails](../README.md#11-guard-rails) doing its job. The README explains [which agent needs how much model](../README.md#which-agent-needs-how-much-model).
 
 ## Try it yourself
 
@@ -176,4 +179,4 @@ cp .env.example .env          # then paste your free Groq key after LLM_API_KEY=
 docker compose up -d --build
 ```
 
-Open http://localhost:8000 and follow the three steps on the page. The [README](../README.md#3-quick-start) has the details.
+Open http://localhost:8000 and follow the three steps on the page. The [README](../README.md#4-quick-start) has the details.

@@ -509,6 +509,26 @@ function viewHow() {
          writes down what looks unsafe. Here three AI agents do the organising and four scanner tools do the looking.</p>
     </section>
 
+    <h2>Pen testing, and where this tool fits</h2>
+    <div class="card">
+      <p>A <b>penetration test</b> ("pen test") is a planned and permitted attempt to find the weak spots in a website
+         before a criminal does. It is needed because every system has mistakes, and attackers scan the internet for
+         them all day.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Stage of a pen test</th><th>In plain words</th><th>Here</th></tr></thead>
+        <tbody>
+          <tr><td>1. Planning and scope</td><td>Agree what may be tested, and get permission</td><td><b>Yes</b>: the permission box and your notes</td></tr>
+          <tr><td>2. Information gathering</td><td>Learn what is there: open ports, software in use</td><td><b>Yes</b>: nmap, ZAP, Nuclei</td></tr>
+          <tr><td>3. Scanning for weaknesses</td><td>Compare it against known weaknesses and risky settings</td><td><b>Yes</b>: ZAP, Nuclei, Nikto</td></tr>
+          <tr><td>4. Exploitation</td><td>Use a weakness to actually get in</td><td><b>No</b>, on purpose</td></tr>
+          <tr><td>5. After getting in</td><td>See how far an attacker could go</td><td><b>No</b></td></tr>
+          <tr><td>6. Reporting</td><td>Each finding, how serious it is, how to fix it</td><td><b>Yes</b>: the Reporter agent</td></tr>
+        </tbody>
+      </table></div>
+      <p class="muted small">So this is the finding and reporting half of a pen test, often called a vulnerability
+         assessment. Breaking in is left out because it can damage a system. A clean report does not mean "secure".</p>
+    </div>
+
     <h2>The three agents</h2>
     <div class="explain spaced">
       ${AGENTS.map((agent) => `<div class="card"><div class="icon">${agent.icon}</div><h3>${agent.name}</h3><p>${agent.does}</p>
@@ -534,6 +554,20 @@ function viewHow() {
         <li><b>Findings are leads, not proof.</b> Nothing is exploited, so some findings can be false alarms.</li>
         <li><b>Quality checks</b> are automatic tests on the report itself, for example that every finding really
             appears in the scanner's raw output.</li>
+      </ul>
+    </div>
+
+    <h2>Guard rails: limits the AI cannot cross</h2>
+    <div class="card">
+      <ul class="plain">
+        <li><b>No tick, no scan.</b> The page, the server and the scanners each check for your saved permission.</li>
+        <li><b>The target is fixed.</b> The scanners read it from your saved check. Nothing the AI writes can change it.</li>
+        <li><b>Only planned tools run.</b> The Planner can pick only tools that exist. The Executor can call only the
+            planned ones, once each, and cannot skip one silently.</li>
+        <li><b>The AI cannot invent a finding.</b> Code copies findings from the scanners and sets the severity.
+            The AI only adds the summary and fix advice.</li>
+        <li><b>Looking only.</b> No attack input, no forms submitted, and the tools are slowed down so the site stays up.</li>
+        <li><b>Text from the scanned site is treated as data,</b> never as instructions to the AI.</li>
       </ul>
     </div>
 

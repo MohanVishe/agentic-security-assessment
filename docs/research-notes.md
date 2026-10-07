@@ -73,3 +73,7 @@ Sources: [PentestGPT paper](https://arxiv.org/abs/2308.06782), [PentestGPT](http
 - Langfuse v4 (self-hosted, events-only mode) no longer serves `GET /api/public/traces`. Looking a run up by session works through `GET /api/public/v2/observations?sessionId=...`; scores are still written with `POST /api/public/scores` and read with `GET /api/public/v3/scores`. The backend tries the new endpoint first and falls back to the old one.
 
 Sources: [Langflow: Langfuse integration](https://docs.langflow.org/integrations-langfuse), [Langfuse public API](https://api.reference.langfuse.com/).
+
+## Guard rails and models
+
+The full list of guard rails (who may be scanned, what each agent may do, what the scanners may do, how data is protected) is in [README section 11](../README.md#11-guard-rails). Which agent needs how much model, and the run with a small model for the Planner and Executor, is in [README section 13](../README.md#13-choosing-the-ai-model).

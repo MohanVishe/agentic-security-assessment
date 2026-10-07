@@ -15,6 +15,7 @@ pytest.importorskip("lfx")
 LANGFLOW = Path(__file__).parent.parent
 sys.path[:0] = [str(LANGFLOW / "agentlib"), str(LANGFLOW / "components" / "security_agents")]
 
+import agent_common  # noqa: E402
 import executor_agent  # noqa: E402
 from langchain_core.messages import AIMessage  # noqa: E402
 
@@ -96,3 +97,10 @@ def test_a_tool_outside_the_plan_and_a_repeat_are_both_refused(monkeypatch):
 def test_the_plan_still_runs_in_order_when_the_model_is_unavailable(monkeypatch):
     output, ran, _ = run_executor(monkeypatch, [RuntimeError("rate limited")])
     assert ran == ["nmap", "zap"] and output["execution"]["driver"].startswith("plan order")
+
+
+def test_each_agent_can_be_given_its_own_model(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL_EXECUTOR", "small-model")
+    assert agent_common.model_for("executor") == "small-model"
+    assert agent_common.model_for("executor", "chosen-on-canvas") == "chosen-on-canvas"
+    assert agent_common.model_for("planner") == ""  # empty means LLM_MODEL

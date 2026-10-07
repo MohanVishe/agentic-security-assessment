@@ -1,7 +1,7 @@
 import json
 
 import httpx
-from agent_common import SCANNERS_URL, chat, notify, text_of, tracing
+from agent_common import SCANNERS_URL, chat, model_for, notify, text_of, tracing
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import StructuredTool
 from lfx.custom.custom_component.component import Component
@@ -48,7 +48,7 @@ class ExecutorAgent(Component):
         MessageTextInput(name="plan", display_name="Plan", info="Output of the Planner Agent."),
         MultilineInput(name="instructions", display_name="Instructions", value=EXECUTOR_PROMPT),
         StrInput(name="model_name", display_name="Model (optional)", value="",
-                 info="Leave empty to use LLM_MODEL from .env."),
+                 info="Leave empty to use LLM_MODEL_EXECUTOR, or else LLM_MODEL, from .env."),
     ]
     outputs = [Output(display_name="Tool Results", name="results", method="execute_plan")]
 
@@ -110,7 +110,8 @@ class ExecutorAgent(Component):
             """The tool-calling loop. `config` ties every LLM turn and tool run to this step in the trace."""
             model, reminded = "", False
             for _turn in range(len(planned) + 3):
-                reply, model = await chat(messages, tools=list(tools.values()), config=config, model=self.model_name)
+                reply, model = await chat(messages, tools=list(tools.values()), config=config,
+                                          model=model_for("executor", self.model_name))
                 messages.append(reply)
                 if not reply.tool_calls:
                     missing = [name for name in planned if name not in runs]

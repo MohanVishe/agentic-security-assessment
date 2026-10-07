@@ -1,7 +1,7 @@
 import json
 
 import httpx
-from agent_common import SCANNERS_URL, chat_json, notify, tracing
+from agent_common import SCANNERS_URL, chat_json, model_for, notify, tracing
 from lfx.custom.custom_component.component import Component
 from lfx.io import MessageTextInput, MultilineInput, Output, StrInput
 from lfx.schema.message import Message
@@ -48,7 +48,7 @@ class PlannerAgent(Component):
                          info="JSON from the backend: scan_id, target_url, scope_notes."),
         MultilineInput(name="instructions", display_name="Instructions", value=PLANNER_PROMPT),
         StrInput(name="model_name", display_name="Model (optional)", value="",
-                 info="Leave empty to use LLM_MODEL from .env."),
+                 info="Leave empty to use LLM_MODEL_PLANNER, or else LLM_MODEL, from .env."),
     ]
     outputs = [Output(display_name="Plan", name="plan", method="make_plan")]
 
@@ -71,7 +71,7 @@ class PlannerAgent(Component):
                 "available_tools": [{key: tool[key] for key in ("name", "description", "typical_duration")}
                                     for tool in catalog],
             })},
-        ], config=tracing(self), model=self.model_name)
+        ], config=tracing(self), model=model_for("planner", self.model_name))
 
         # Keep only real tools, once each, in the order the Planner chose.
         steps = []
