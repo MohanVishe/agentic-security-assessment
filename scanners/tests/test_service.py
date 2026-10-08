@@ -4,9 +4,9 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app as service
-from tools.common import Target
 
 SCAN_ID = "a" * 32
+RECORD = {"authorized": True, "stop_requested": False, "target_url": "http://t:3000", "basic_auth": None}
 
 
 class FakeTool:
@@ -25,17 +25,31 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "TOOLS", {"fake": FakeTool})
     monkeypatch.setattr(service, "DATA_DIR", tmp_path)
     monkeypatch.setattr(service, "COOL_DOWN_SECONDS", 0)
-    monkeypatch.setattr(service, "authorized_target", lambda scan_id: Target(url="http://t:3000"))
+    monkeypatch.setattr(service, "authorization_record", lambda scan_id: dict(RECORD))
     monkeypatch.setattr(service, "answers", lambda target, wait_seconds: True)
     return TestClient(service.app)
 
 
 def test_a_scan_without_authorization_is_refused(client, monkeypatch):
-    def refuse(scan_id):
-        raise HTTPException(403, "This scan has no recorded authorization; refusing to run")
-
-    monkeypatch.setattr(service, "authorized_target", refuse)
+    # also the answer while a plan is still waiting for the user's approval
+    monkeypatch.setattr(service, "authorization_record", lambda scan_id: RECORD | {"authorized": False})
     assert client.post("/run/fake", json={"scan_id": SCAN_ID}).status_code == 403
+    assert FakeTool.calls == 0
+
+
+def test_a_scan_the_backend_does_not_know_is_refused(client, monkeypatch):
+    def unknown(scan_id):
+        raise HTTPException(403, "Unknown scan, or the backend rejected the authorization check")
+
+    monkeypatch.setattr(service, "authorization_record", unknown)
+    assert client.post("/run/fake", json={"scan_id": SCAN_ID}).status_code == 403
+    assert FakeTool.calls == 0
+
+
+def test_no_tool_starts_after_the_user_pressed_stop(client, monkeypatch):
+    monkeypatch.setattr(service, "authorization_record", lambda scan_id: RECORD | {"stop_requested": True})
+    result = client.post("/run/fake", json={"scan_id": SCAN_ID}).json()
+    assert result["status"] == "stopped" and result["stopped"] is True and result["summary"]["stopped"] is True
     assert FakeTool.calls == 0
 
 

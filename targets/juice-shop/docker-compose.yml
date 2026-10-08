@@ -1,0 +1,15 @@
+# The practice target: OWASP Juice Shop, a shop website that is insecure on purpose.
+# It is not part of the product. It is here so there is something safe and legal to check.
+#
+# The main docker-compose.yml includes this file, so `docker compose up` starts it too.
+# To leave it out, remove the `include:` lines there.
+#
+#   From your browser:   http://localhost:3001
+#   From the scanners:   http://juice-shop:3000
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v20.2.0
+    ports:
+      - "127.0.0.1:${JUICE_SHOP_PORT:-3001}:3000"
+    restart: unless-stopped

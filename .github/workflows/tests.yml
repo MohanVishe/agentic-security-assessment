@@ -18,11 +18,13 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r backend/requirements.txt -r scanners/requirements.txt pytest
-      - name: Backend tests (authorization gate, quality checks, reports)
+      - name: Backend tests (permission gate, plan review, stop, comparison, report formats, quality checks)
         run: cd backend && python -m pytest -q
-      - name: Scanner tests (parsers, target care)
+      - name: Scanner tests (parsers, target care, stop)
         run: cd scanners && python -m pytest -q
       - name: Flow files match the agent code
         run: python -m pytest -q langflow/tests
-      - name: Web page script parses
-        run: node --check frontend/app.js
+      - name: Web page scripts parse
+        run: for file in frontend/public/js/*.js frontend/public/js/views/*.js; do node --check "$file"; done
+      - name: Compose file is valid
+        run: docker compose config --quiet

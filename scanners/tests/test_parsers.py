@@ -17,7 +17,10 @@ NMAP_XML = """<?xml version="1.0"?>
 ZAP_ALERTS = [
     {"alertRef": "10038-1", "pluginId": "10038", "name": "Content Security Policy (CSP) Header Not Set",
      "risk": "Medium", "cweid": "693", "url": "http://t/", "evidence": "", "param": "",
-     "description": "CSP is missing.", "solution": "Set the header.", "reference": "https://a\nhttps://b"},
+     "description": "CSP is missing.", "solution": "Set the header.", "reference": "https://a\nhttps://b",
+     "tags": {"CWE-693": "https://cwe.mitre.org/data/definitions/693.html",
+              "OWASP_2021_A05": "https://owasp.org/Top10/2021/A05_2021-Security_Misconfiguration/",
+              "OWASP_2025_A02": "https://owasp.org/Top10/2025/A02_2025-Security_Misconfiguration/"}},
     {"alertRef": "10038-1", "pluginId": "10038", "name": "Content Security Policy (CSP) Header Not Set",
      "risk": "Medium", "cweid": "693", "url": "http://t/login", "description": "CSP is missing.",
      "solution": "Set the header.", "reference": ""},
@@ -66,6 +69,15 @@ def test_zap_groups_alert_instances_by_rule():
     assert csp["instances"] == 2 and csp["tool_severity"] == "Medium" and csp["cwe"] == "CWE-693"
     assert csp["remediation"] == "Set the header." and csp["references"] == ["https://a", "https://b"]
     assert findings[1]["cwe"] is None
+
+
+def test_zap_owasp_category_comes_from_zaps_own_tags_and_is_never_guessed():
+    findings = zap.parse(ZAP_ALERTS)
+    assert findings[0]["owasp"] == "A02:2025 Security Misconfiguration"  # the newest list ZAP tagged
+    assert findings[1]["owasp"] is None                                  # no tag, no category
+    old_style = {"OWASP_2017_A03": "https://owasp.org/www-project-top-ten/2017/A3_2017-Sensitive_Data_Exposure.html"}
+    assert zap.owasp_category(old_style) == "A03:2017 Sensitive Data Exposure"
+    assert zap.owasp_category({"WSTG-v42-INFO-08": "https://owasp.org/wstg"}) is None
 
 
 def test_nuclei_keeps_the_scanner_cvss_score_and_skips_bad_lines():

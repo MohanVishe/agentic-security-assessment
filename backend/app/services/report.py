@@ -32,13 +32,19 @@ def _cell(text: str) -> str:
 
 
 def _run_notes(report: dict) -> list[str]:
-    """Plain sentences about anything that did not go to plan: time limits, a target that went down, skipped tools."""
+    """Plain sentences about how the run went: a reviewed plan, time limits, a target that went down, skipped tools."""
     notes = [f"{run['tool']}: {run['note']}" for run in report.get("tool_runs", [])
              if run.get("note") and (run["status"] != "ok" or run.get("target_down"))]
+    review = report.get("plan", {}).get("review")
+    if review:
+        changes = [f"added {', '.join(review['added'])}"] if review.get("added") else []
+        changes += [f"removed {', '.join(review['removed'])}"] if review.get("removed") else []
+        notes.insert(0, f"The plan was reviewed by {review.get('reviewed_by') or 'the user'} before any scanner ran: "
+                        f"{'; '.join(changes) or 'approved as the Planner suggested'}.")
     execution = report.get("execution", {})
     if execution.get("skipped"):
         reason = execution.get("stop_reason") or "no reason given"
-        notes.append(f"Planned but not run: {', '.join(execution['skipped'])}. The Executor's reason: {reason}")
+        notes.append(f"Planned but not run: {', '.join(execution['skipped'])}. Reason: {reason}")
     return notes
 
 
@@ -112,6 +118,8 @@ def to_markdown(scan: dict) -> str:
         ]
         if item.get("cwe"):
             lines.append(f"- **Weakness type:** {item['cwe']}")
+        if item.get("owasp"):
+            lines.append(f"- **OWASP Top 10 category (from {item['tool']}):** {item['owasp']}")
         if item.get("url"):
             lines.append(f"- **Where:** `{item['url']}` (seen {item.get('instances', 1)}×)")
         if item.get("description"):
@@ -222,7 +230,8 @@ def to_pdf(scan: dict) -> bytes:
             Paragraph(f'{number}. <font color="{color}"><b>[{escape(item["severity"])}]</b></font> '
                       f'{escape(item["title"])}', finding_title),
             p(f"{item['id']} · {item['tool']}{score} · {item.get('severity_basis', '')}"
-              + (f" · {item['cwe']}" if item.get("cwe") else ""), small),
+              + (f" · {item['cwe']}" if item.get("cwe") else "")
+              + (f" · OWASP {item['owasp']}" if item.get("owasp") else ""), small),
         ]
         if item.get("url"):
             block.append(labelled("Where:", f"{item['url']} (seen {item.get('instances', 1)}x)", mono))

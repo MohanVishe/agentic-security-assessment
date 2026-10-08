@@ -1,6 +1,6 @@
 """The quality checks and the report formats, run on a small hand-made report and raw scanner files."""
-from app import evaluation
-from app import report as rendering
+from app.services import evaluation
+from app.services import report as rendering
 
 
 def make_report(**changes) -> dict:
@@ -65,6 +65,15 @@ def test_a_skipped_tool_and_a_target_that_went_down_are_caught(tmp_path):
     assert result["plan_followed"] == 0.5 and result["target_stayed_up"] == 0
 
 
+def test_a_check_the_user_stopped_says_so(tmp_path):
+    write_raw(tmp_path)
+    report = make_report()
+    report["tool_runs"] = report["tool_runs"][:1]
+    report["execution"].update(skipped=["nuclei"], stop_reason="Stopped by the user.")
+    followed = evaluation.evaluate(report, tmp_path)[0]
+    assert followed["score"] == 0.5 and followed["detail"] == "1 of 2 planned tools ran (Stopped by the user)"
+
+
 def test_the_markdown_and_pdf_reports_carry_the_run_notes_and_the_checks(tmp_path):
     write_raw(tmp_path)
     report = make_report()
@@ -75,4 +84,16 @@ def test_the_markdown_and_pdf_reports_carry_the_run_notes_and_the_checks(tmp_pat
     markdown = rendering.to_markdown(scan)
     assert "Planned but not run: nikto" in markdown and "findings_traceable" in markdown
     assert "## 2. Fix these first" in markdown and "confirmed by Tester" in markdown
+    assert rendering.to_pdf(scan).startswith(b"%PDF")
+
+
+def test_the_reports_say_who_reviewed_the_plan_and_show_the_owasp_category(tmp_path):
+    report = make_report()
+    report["plan"]["review"] = {"reviewed_by": "Tester", "added": ["nmap"], "removed": ["nikto"]}
+    report["findings"][0]["owasp"] = "A05:2021 Security Misconfiguration"
+    scan = {"id": "a" * 32, "target_url": "http://t", "scope_notes": "", "authorized_by": "Tester",
+            "authorized_at": "2026-01-01T00:00:00+00:00", "report": report}
+    markdown = rendering.to_markdown(scan)
+    assert "The plan was reviewed by Tester before any scanner ran: added nmap; removed nikto." in markdown
+    assert "OWASP Top 10 category (from zap):** A05:2021 Security Misconfiguration" in markdown
     assert rendering.to_pdf(scan).startswith(b"%PDF")

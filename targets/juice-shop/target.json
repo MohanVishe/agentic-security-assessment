@@ -1,0 +1,6 @@
+{
+  "name": "OWASP Juice Shop",
+  "url": "http://juice-shop:3000",
+  "badge": "runs on your machine",
+  "note": "A practice shop that is insecure on purpose. It starts with this project, so it is safe and legal to check."
+}

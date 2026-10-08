@@ -39,7 +39,10 @@ def evaluate(report: dict, raw_dir: Path) -> list[dict]:
         checks.append({"name": name, "score": round(passed / total, 2) if total else 1.0, "detail": detail})
 
     done = [tool for tool in planned if tool in ran]
-    check("plan_followed", len(done), len(planned), f"{len(done)} of {len(planned)} planned tools ran")
+    # A check the user stopped is not the agent's mistake, but the report still covers less than planned.
+    why = report.get("execution", {}).get("stop_reason", "")[:120] if len(done) < len(planned) else ""
+    check("plan_followed", len(done), len(planned),
+          f"{len(done)} of {len(planned)} planned tools ran" + (f" ({why.rstrip('.')})" if why else ""))
 
     outside = [tool for tool in ran if tool not in planned]
     check("stayed_in_scope", 0 if outside else 1, 1,

@@ -27,7 +27,7 @@ def call(tool: str) -> AIMessage:
     return AIMessage(content="", tool_calls=[{"name": f"run_{tool}", "args": {"reason": "planned"}, "id": f"call-{tool}"}])
 
 
-def run_executor(monkeypatch, replies, down_after=()):
+def run_executor(monkeypatch, replies, down_after=(), stop_before=()):
     """Run the Executor with scripted model replies. Returns (output, tools that ran, model turns used)."""
     ran, turns = [], []
 
@@ -48,8 +48,16 @@ def run_executor(monkeypatch, replies, down_after=()):
 
         async def post(self, url, json):
             tool = url.rsplit("/", 1)[-1]
-            ran.append(tool)
             down = tool in down_after
+            if tool in stop_before:
+                # what the scanner service answers once the user has pressed stop
+                class Stopped:
+                    status_code = 200
+                    def json(self):
+                        return {"tool": tool, "status": "stopped", "stopped": True, "findings": [],
+                                "summary": {"tool": tool, "status": "stopped", "stopped": True, "finding_count": 0}}
+                return Stopped()
+            ran.append(tool)
 
             class Response:
                 status_code = 200
@@ -86,6 +94,20 @@ def test_stopping_because_the_target_went_down_needs_no_reminder(monkeypatch):
     replies = [call("nmap"), AIMessage(content="The target stopped answering, so I am stopping.")]
     output, ran, turns = run_executor(monkeypatch, replies, down_after=("nmap",))
     assert ran == ["nmap"] and turns == 2 and output["execution"]["skipped"] == ["zap"]
+
+
+def test_a_check_stopped_by_the_user_starts_no_further_tool(monkeypatch):
+    replies = [call("nmap"), call("zap"), AIMessage(content="The user stopped the check.")]
+    output, ran, turns = run_executor(monkeypatch, replies, stop_before=("zap",))
+    assert ran == ["nmap"] and turns == 3  # no reminder: the stop is a good reason
+    assert [run["tool"] for run in output["tool_runs"]] == ["nmap"]  # a stopped tool is not a run
+    assert output["execution"]["skipped"] == ["zap"]
+    assert output["execution"]["stop_reason"] == executor_agent.USER_STOP
+
+
+def test_a_stop_is_respected_when_the_model_is_unavailable(monkeypatch):
+    output, ran, _ = run_executor(monkeypatch, [RuntimeError("rate limited")], stop_before=("zap",))
+    assert ran == ["nmap"] and output["execution"]["stop_reason"] == executor_agent.USER_STOP
 
 
 def test_a_tool_outside_the_plan_and_a_repeat_are_both_refused(monkeypatch):

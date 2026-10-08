@@ -131,6 +131,13 @@ input:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focu
             padding: 11px 0; border-top: 1px solid var(--line); }
 .tool-row:first-of-type { border-top: 0; }
 .tool-row .name { font-weight: 650; }
+/* plan review: the same rows, with a tick box in front of the tool name */
+.tool-row.pick { cursor: pointer; }
+.tool-row.pick input { width: 17px; height: 17px; margin: 0 6px 0 0; vertical-align: -3px; }
+.tool-row.pick:has(input:not(:checked)) > span:nth-child(2) { opacity: .6; }
+.card-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.card-head h2 { margin: 0; }
+.card-head > :last-child:not(h2) { margin-left: auto; }
 .log { max-height: 260px; overflow: auto; font-size: 13px; }
 .log div { padding: 4px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 62px 78px 1fr; gap: 8px; }
 .log div:first-child { border-top: 0; }
@@ -186,6 +193,11 @@ details.finding .body p { margin: 0; overflow-wrap: anywhere; }
 .spaced { margin-bottom: 16px; }
 ul.plain { margin: 0; padding-left: 20px; }
 ul.plain li { margin-bottom: 5px; }
+
+/* what changed since the last check */
+.tiles.three { grid-template-columns: repeat(3, 1fr); }
+.card h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+ul.plain .badge { min-width: 0; margin-right: 4px; }
 
 /* ---------- how it works */
 .explain { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }

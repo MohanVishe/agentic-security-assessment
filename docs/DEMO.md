@@ -23,7 +23,9 @@ After `docker compose up -d --build`, the page is at http://localhost:8000. The 
 
 ![The start page](demo/01-start-page.png)
 
-There are three choices: the local practice shop (the default), a public test site, or a website of your own. The notes box is where you tell the agents, in normal words, what you want. The three small buttons fill in common requests. This demo uses **Full check**.
+There are two choices: the local practice shop (the default) or a website of your own. The notes box is where you tell the agents, in normal words, what you want. The three small buttons fill in common requests. This demo uses **Full check**.
+
+The tick box **Show me the plan first** makes the check wait for your approval before anything is scanned. [Step 9](#step-9-you-stay-in-charge-review-stop-check-again) shows it. The run in steps 3 to 8 was made without it.
 
 ## Step 2. No tick, no scan
 
@@ -170,6 +172,46 @@ All three models also pass the 12-case Planner test set ([results](../evals/resu
 
 The last row uses a different model per agent: a small, fast one plans and runs the tools, and the larger one writes the report. In that run the small model answered after the third tool without calling the fourth. Code noticed the missing tool and reminded it once, and it then ran Nikto. That is one of the [guard rails](../README.md#11-guard-rails) doing its job. The README explains [which agent needs how much model](../README.md#which-agent-needs-how-much-model).
 
+## Step 9. You stay in charge: review, stop, check again
+
+These three features were added after comparing the project with the AI pen testing products on the market ([the comparison](MARKET-COMPARISON.md)). The screenshots are from two runs on 8 October 2026.
+
+### Review the plan before anything is scanned
+
+The notes said *"Web application checks only. Do not port scan."* The Planner proposed ZAP and Nuclei and explained why it left the other two out. The page then waits:
+
+![The plan review](demo/15-plan-review.png)
+
+Every tool that exists is a tick box. Here nmap was ticked by hand, to show a change. Pressing **Approve and start scanning** runs exactly the ticked tools. Until then the scanner service refuses every request for this check, so a plan that is waiting cannot scan anything.
+
+The approved plan is not sent back to the AI for a second opinion. Code checks it against the tool list and hands it to the Executor:
+
+![The approved plan running](demo/16-running-with-stop.png)
+
+The row for nmap says "Added by the reviewer". The report keeps that on record: *"The plan was reviewed by ... before any scanner ran: added nmap."*
+
+### Stop a check
+
+While the scanners run there is a **Stop after the current tool** button. In this run it was pressed during the first tool:
+
+![Stop requested](demo/17-stop-requested.png)
+
+nmap finished, the next tool was refused by the scanner service, and the Reporter wrote the report from what ran. The report says what did not run and why, and the quality check "Followed the plan" shows that only 1 of 4 planned tools ran:
+
+![The report of a stopped check](demo/20-stopped-report.png)
+
+### Check again, and see what changed
+
+**Check again** on a report opens the form with the same website and notes. From the second check of a website onwards, the report compares itself with the one before:
+
+![What changed since the last check](demo/18-report-with-comparison.png)
+
+Here 22 findings are still there and one is new. Nikto ran last time and not this time, so its findings are left out of the comparison instead of being shown as "gone".
+
+The same screenshot shows two more additions: the **SARIF** download, a standard format that security dashboards can import, and the **OWASP Top 10** categories. The category comes from the scanner's own output and is shown on each finding:
+
+![A finding with its OWASP category](demo/19-finding-with-owasp.png)
+
 ## Try it yourself
 
 ```bash
@@ -179,4 +221,4 @@ cp .env.example .env          # then paste your free Groq key after LLM_API_KEY=
 docker compose up -d --build
 ```
 
-Open http://localhost:8000 and follow the three steps on the page. The [README](../README.md#4-quick-start) has the details.
+Open http://localhost:8000 and follow the steps on the page. The [README](../README.md#4-quick-start) has the details.

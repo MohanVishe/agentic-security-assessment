@@ -1,0 +1,6 @@
+{
+  "name": "agentic-security-assessment-frontend",
+  "private": true,
+  "type": "module",
+  "description": "Plain HTML, CSS and JavaScript modules. No build step and no dependencies. This file only tells tools that the .js files are modules."
+}

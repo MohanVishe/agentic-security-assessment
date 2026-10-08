@@ -45,7 +45,8 @@ class PlannerAgent(Component):
 
     inputs = [
         MessageTextInput(name="request", display_name="Assessment Request",
-                         info="JSON from the backend: scan_id, target_url, scope_notes."),
+                         info="JSON from the backend: scan_id, target_url, scope_notes, "
+                              "and approved_plan when a person reviewed the plan."),
         MultilineInput(name="instructions", display_name="Instructions", value=PLANNER_PROMPT),
         StrInput(name="model_name", display_name="Model (optional)", value="",
                  info="Leave empty to use LLM_MODEL_PLANNER, or else LLM_MODEL, from .env."),
@@ -55,12 +56,25 @@ class PlannerAgent(Component):
     async def make_plan(self) -> Message:
         request = json.loads(self.request)
         scan_id = request["scan_id"]
-        await notify(scan_id, "planner", f"Reading the scope and planning the assessment of {request['target_url']}.",
-                     type="agent_start")
+        reviewed = bool(request.get("approved_plan"))
+        await notify(scan_id, "planner", "Passing on the plan you approved." if reviewed else
+                     f"Reading the scope and planning the assessment of {request['target_url']}.", type="agent_start")
 
         async with httpx.AsyncClient(timeout=15) as client:
             catalog = (await client.get(f"{SCANNERS_URL}/tools")).json()
         available = [tool["name"] for tool in catalog]
+
+        if reviewed:
+            # A person already reviewed the Planner's plan and approved this one. It is not
+            # planned again: only checked against the tool list and passed on.
+            approved = request["approved_plan"]
+            steps = [step for step in approved.get("steps", []) if step.get("tool") in available]
+            plan = {**approved, "steps": steps}
+            reviewer = (approved.get("review") or {}).get("reviewed_by") or "the user"
+            await notify(scan_id, "planner", f"Plan approved by {reviewer}: "
+                         f"{', '.join(step['tool'] for step in steps)}.", type="plan", steps=steps)
+            self.status = plan
+            return Message(text=json.dumps({"request": request, "plan": plan}))
 
         # No plan, no scan: if the LLM is unavailable the run stops here rather than guess the scope.
         proposed, model = await chat_json([

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -110,6 +111,7 @@ def parse(alerts: list[dict]) -> list[dict]:
             title=first.get("name") or first.get("alert", "ZAP alert"),
             tool_severity=first.get("risk"),  # High / Medium / Low / Informational
             cwe=f"CWE-{cwe}" if cwe and cwe not in ("-1", "0") else None,
+            owasp=owasp_category(first.get("tags") or {}),
             url=first.get("url", ""),
             description=first.get("description", ""),
             evidence=first.get("evidence") or first.get("param") or first.get("other", ""),
@@ -118,6 +120,21 @@ def parse(alerts: list[dict]) -> list[dict]:
             instances=len(group),
         ))
     return findings
+
+
+def owasp_category(tags: dict) -> str | None:
+    """The OWASP Top 10 category ZAP itself tags an alert with, e.g. "A01:2025 Broken Access Control".
+
+    ZAP tags look like {"OWASP_2025_A01": "https://owasp.org/Top10/2025/A01_2025-Broken_Access_Control/"}.
+    The newest list ZAP knows is used. Nothing is guessed: no tag, no category.
+    """
+    owasp = sorted((key for key in tags if re.fullmatch(r"OWASP_\d{4}_A\d{2}", key)), reverse=True)
+    if not owasp:
+        return None
+    _, year, number = owasp[0].split("_")
+    name = str(tags[owasp[0]]).rstrip("/").rsplit("/", 1)[-1].removesuffix(".html")  # A01_2025-Broken_Access_Control
+    name = name.split("-", 1)[1].replace("_", " ") if "-" in name else ""
+    return f"{number}:{year} {name}".strip()
 
 
 def _command(target: Target) -> str:

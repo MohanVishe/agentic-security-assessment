@@ -4,9 +4,9 @@ Three AI agents check a website for common security problems. They plan the chec
 
 It **finds and reports** problems. It does not attack, exploit or break into anything.
 
-![The report page](docs/demo/05-report-top.png)
+![The report page](docs/demo/18-report-with-comparison.png)
 
-**See it first:** [step-by-step demo with screenshots](docs/DEMO.md) · sample report as [Markdown](docs/sample-report/report.md), [PDF](docs/sample-report/report.pdf) or [JSON](docs/sample-report/report.json)
+**See it first:** [step-by-step demo with screenshots](docs/DEMO.md) · sample report as [Markdown](docs/sample-report/report.md), [PDF](docs/sample-report/report.pdf) or [JSON](docs/sample-report/report.json) · [how it compares with AI pen testing products](docs/MARKET-COMPARISON.md)
 
 ## Contents
 
@@ -107,14 +107,17 @@ This project works **"black box"**: it knows only the website's address, like an
 
 1. You give it a website address and confirm that you are allowed to test it.
 2. A **Planner** agent reads your request and decides which scanner tools fit.
-3. An **Executor** agent runs those tools one after another.
-4. A **Reporter** agent rates what the tools found and writes a report in plain language.
+3. **You review the plan.** Approve it, add or remove tools, or cancel. Nothing is scanned before you approve.
+4. An **Executor** agent runs those tools one after another. You can stop it at any time.
+5. A **Reporter** agent rates what the tools found and writes a report in plain language.
 
-**What you get:** a report on a web page, and as Markdown, PDF and JSON. It lists every finding with its severity, the evidence the scanner saw, and how to fix it.
+**What you get:** a report on a web page, and as PDF, Markdown, JSON and SARIF. It lists every finding with its severity, the evidence the scanner saw, and how to fix it. Run the same check again later and the report also shows **what changed since last time**.
 
-**What "agentic" means here:** the order of work is not hard-coded. An AI model decides which tools to run based on what you asked for ("web checks only, no port scan" gives a different plan than "be thorough"). Code around the model keeps it inside safe limits.
+**What "agentic" means here:** the order of work is not hard-coded. An AI model decides which tools to run based on what you asked for ("web checks only, no port scan" gives a different plan than "be thorough"). Code around the model keeps it inside safe limits, and you have the last word on the plan.
 
 **A short version of this guide is built into the web page**, under "How it works": the pen test stages, the agents, the tools and the guard rails on one page ([screenshot](docs/demo/10-how-it-works.png)).
+
+**How does this compare with the AI pen testing products on the market?** See [docs/MARKET-COMPARISON.md](docs/MARKET-COMPARISON.md): what they offer, what this project has, and what is left out on purpose.
 
 ## 3. Before you scan anything
 
@@ -129,7 +132,7 @@ The tool enforces this in three places:
 
 Your confirmation (name, time, the exact sentence you agreed to) is saved with the check and printed on the report.
 
-Two safe practice targets are built in, so you can try everything without touching a real site.
+A safe practice website is built in, so you can try everything without touching a real site.
 
 ## 4. Quick start
 
@@ -159,6 +162,7 @@ Open **http://localhost:8000**. When the label at the top right turns green and 
 1. Pick what to check. Leave it on **OWASP Juice Shop**, the practice site that started with the project.
 2. Type your name and tick the permission box.
 3. Press **Start the check**.
+4. The Planner shows its plan. Press **Approve and start scanning**. (Untick "Show me the plan first" in step 1 to skip this.)
 
 The page shows the agents working live. A standard check of the practice site takes about 5 minutes. A full check (all four tools) takes about 8.
 
@@ -178,7 +182,7 @@ The page shows the agents working live. A standard check of the practice site ta
 | Label says "No LLM key set" | Put your key in `.env` after `LLM_API_KEY=`, then run `docker compose up -d` again |
 | Label stays on "Starting: langflow" | Langflow needs a minute or two after a start. Wait. |
 | "The check stopped" with a rate limit message | The free tier allows a limited number of requests per day. Wait, or set a second provider under `LLM_FALLBACK_...` in `.env` |
-| Port already in use | Another program uses port 8000, 7860 or 3001. Stop it, or change the port in `docker-compose.yml` |
+| Port already in use | Another program uses port 8000, 7860 or 3001. Stop it, or change the port in `docker-compose.yml` (for 3001: `JUICE_SHOP_PORT` in `.env`) |
 
 ## 5. How it works
 
@@ -186,8 +190,11 @@ The page shows the agents working live. A standard check of the practice site ta
 flowchart LR
     you(["You, in a browser"])
 
+    subgraph frontend["frontend container"]
+        page["Web page<br/>and the only door in"]
+    end
+
     subgraph backend["backend container"]
-        page["Web page"]
         api["API<br/>permission gate<br/>saved checks and reports"]
     end
 
@@ -203,15 +210,15 @@ flowchart LR
     end
 
     zap["zap container<br/>OWASP ZAP"]
-    target[("Target website<br/>Juice Shop by default")]
+    target[("Target website<br/>practice shop by default")]
     llm{{"AI model<br/>Groq by default"}}
     langfuse{{"Langfuse<br/>optional tracing"}}
 
-    you --> page --> api
-    api -- "start the flow" --> planner
+    you --> page -- "/api/ calls" --> api
+    api -- "ask for a plan, then<br/>run the approved plan" --> planner
     planner -. "which tools exist?" .-> tools
     executor -- "run tool X for check 123" --> tools
-    tools -- "is check 123 authorized?<br/>what is its target?" --> api
+    tools -- "is check 123 authorized?<br/>was it stopped?<br/>what is its target?" --> api
     tools --> zap
     tools == "scan" ==> target
     zap == "scan" ==> target
@@ -228,27 +235,49 @@ flowchart LR
 | 1 | You enter a website address and optional notes ("web checks only") | You, on the web page |
 | 2 | The address is checked: it must be a normal `http://` or `https://` address, and it must not point at the tool's own parts | Backend code |
 | 3 | You tick the permission box. The confirmation is saved with the check | You, then backend code |
-| 4 | The backend hands the check to the agent flow in Langflow | Backend code |
-| 5 | The **Planner** asks the scanner service which tools exist, reads your notes, and returns a plan: an ordered list of tools with a reason for each | AI model, checked by code |
-| 6 | The **Executor** calls the planned tools one at a time. Each tool is a function the AI can call | AI model, limited by code |
-| 7 | Before each tool the scanner service asks the backend for the permission record and the target. It pauses 15 seconds between tools and checks that the target still answers | Scanner service code |
-| 8 | Each scanner's untouched output is saved to disk. A short summary goes back to the Executor | Scanner service code |
-| 9 | The **Reporter** copies every finding from the tool results, gives it a severity, and asks the AI for a summary, a "fix these first" list and fix advice | Code first, then AI model |
-| 10 | The backend runs seven quality checks on the finished report and saves it | Backend code |
-| 11 | The web page shows the report. You can download it as Markdown, PDF or JSON | You |
+| 4 | The backend asks the **Planner** for a plan. The Planner asks the scanner service which tools exist, reads your notes, and returns an ordered list of tools with a reason for each | AI model, checked by code |
+| 5 | **You review the plan**: approve it, tick or untick tools, or cancel. Until you approve, the scanner service refuses every request for this check | You |
+| 6 | The backend hands the approved plan to the agent flow. An approved plan is not planned again; it is only checked against the tool list | Backend code |
+| 7 | The **Executor** calls the planned tools one at a time. Each tool is a function the AI can call | AI model, limited by code |
+| 8 | Before each tool the scanner service asks the backend three things: is this check authorized, did the user press stop, and what is the target? It pauses 15 seconds between tools and checks that the target still answers | Scanner service code |
+| 9 | Each scanner's untouched output is saved to disk. A short summary goes back to the Executor | Scanner service code |
+| 10 | The **Reporter** copies every finding from the tool results, gives it a severity, and asks the AI for a summary, a "fix these first" list and fix advice | Code first, then AI model |
+| 11 | The backend runs seven quality checks on the finished report and saves it | Backend code |
+| 12 | The web page shows the report, and what changed since the last check of the same website. You can download it as PDF, Markdown, JSON or SARIF | You |
+
+Without the plan review (the tick box "Show me the plan first" switched off, or the API called without `review_plan`), steps 4 to 6 are one step: the Planner's plan goes straight to the Executor.
+
+**The states of a check:**
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> created: address accepted
+    created --> authorized: permission box ticked
+    authorized --> planning: start, with plan review
+    planning --> awaiting_approval: the plan is ready
+    awaiting_approval --> running: you approve
+    awaiting_approval --> cancelled: you cancel
+    authorized --> running: start, without review
+    running --> completed: report saved
+    running --> failed: something went wrong
+    planning --> failed
+```
+
+"Stop after the current tool" does not add a state. The check stays `running`, the Executor starts no further tool, and the Reporter writes the report from what ran.
 
 ## 6. The parts, one by one
 
-Everything runs in five Docker containers, started together by one `docker compose` command.
+Everything runs in six Docker containers, started together by one `docker compose` command. Each part has its own folder, so you can change one without touching the others.
 
 | Part | In plain words | Code |
 |---|---|---|
-| **Web page** | What you see in the browser. Plain HTML, CSS and JavaScript, no framework | [`frontend/`](frontend/) |
-| **Backend** | The front desk. It saves checks, enforces the permission rule, starts the agents, checks the finished report and produces the Markdown and PDF | [`backend/app/`](backend/app/) |
+| **Web page** (frontend) | What you see in the browser. Plain HTML, CSS and JavaScript, no framework and no build step. It runs in a small web server (nginx) that is the only door in: it passes `/api/` calls on to the backend and nothing else | [`frontend/`](frontend/) |
+| **Backend** | The front desk. It saves checks, enforces the permission rule, starts the agents, holds the plan until you approve it, checks the finished report and produces the PDF, Markdown and SARIF. It is not reachable from outside Docker on its own | [`backend/app/`](backend/app/) |
 | **Langflow** | An open-source tool for building AI agent flows. It runs the three agents and shows them as boxes on a canvas that you can edit | [`langflow/`](langflow/) |
 | **Scanner service** | A small program that knows how to run each scanner and turn its output into one common format | [`scanners/`](scanners/) |
 | **OWASP ZAP** | A well-known web security scanner. It runs in its own container and the scanner service drives it by remote control | official ZAP image |
-| **Juice Shop** | The practice website to scan | official Juice Shop image |
+| **Practice target** | The website to scan while learning: OWASP Juice Shop. It is kept apart from the product, in its own folder with its own compose file | [`targets/juice-shop/`](targets/juice-shop/) |
 | **AI model** | The "brain" the agents ask. It runs at Groq (free tier) by default. Any OpenAI-compatible service works, including a local one | set in `.env` |
 | **Langfuse** (optional) | A tool that records every step the agents take, so you can inspect and score a run afterwards | set in `.env` |
 
@@ -301,13 +330,14 @@ Nikto is noisy, so the Planner only adds it when you ask for a full or thorough 
 - Scanning it is always allowed: it is yours.
 - Inside Docker its address is `http://juice-shop:3000`. That is what the scanners use. In your own browser it is http://localhost:3001.
 
-The web page offers three choices for what to check:
+The web page offers two choices for what to check:
 
 | Choice | What it is |
 |---|---|
 | **OWASP Juice Shop** | The local practice shop. The default |
-| **Acunetix test site** (`testphp.vulnweb.com`) | A public site that the security company Acunetix keeps online for trying scanners |
-| **Another website** | Your own site, or one you have written permission to test. To scan something running on your own computer, enter `http://localhost:<port>` |
+| **Another website** | Your own site, or one you have written permission to test. To scan something running on your own computer, enter `http://localhost:<port>`. If the site runs on a hosting platform, check first that the host allows security scanning; many do not on their free plans |
+
+**The practice target is kept apart from the product.** Everything about it is in [`targets/juice-shop/`](targets/juice-shop/): the compose file that starts it and a small `target.json` with the name and address shown on the page. The main `docker-compose.yml` only includes that file. To add a practice site of your own, add a folder next to it; the [folder's README](targets/juice-shop/README.md) has the three steps. No code change is needed.
 
 ## 10. Reading the report
 
@@ -316,12 +346,16 @@ The web page offers three choices for what to check:
 | Part of the report | What it tells you |
 |---|---|
 | **Severity tiles** | How many findings at each level: Critical, High, Medium, Low, Info (just good to know) |
+| **OWASP Top 10 categories** | How many findings fall into each category of the OWASP Top 10, the well-known list of the ten most common kinds of website weakness. Shown only where the scanner itself names the category (ZAP does). The AI never assigns one |
+| **What changed since the last check** | Appears from the second check of the same website onwards: findings that are new, no longer reported, and still there. Only tools that ran both times are compared, so a tool you left out never looks like a fixed problem |
 | **Summary** | A few plain sentences on the overall picture. Written by the Reporter agent |
 | **Fix these first** | Up to five actions, most important first, each linked to the findings it would solve |
-| **What ran** | Each tool, why the Planner chose it, how long it took, how many findings it produced, and anything that did not go to plan |
+| **What ran** | Each tool, why it was in the plan, how long it took, how many findings it produced, who reviewed the plan and what they changed, and anything that did not go to plan (a time limit, a stop, a target that went down) |
 | **Findings** | One card per finding. Open it to see why it has that severity, where it was seen, the evidence, how to fix it, and a link to the scanner's raw output |
 | **What was not tested** | An honest list of what a check like this cannot see |
 | **Quality checks** | Automatic tests on the report itself (see [section 12](#12-tracing-and-evaluation)) |
+| **Downloads** | PDF and Markdown for people. JSON and SARIF for other programs: SARIF is a standard format that code hosting sites and security dashboards (GitHub code scanning, DefectDojo and others) can import |
+| **Check again** | Opens the form with the same website and notes filled in. Use it after fixing things |
 
 **How severity is decided:** if the scanner supplies a CVSS score (the industry's 0 to 10 scale), the report uses it. Otherwise the scanner's own rating (high, medium, low) is mapped to the level of the same name, and the finding says so. The AI never sets a severity.
 
@@ -341,6 +375,15 @@ A guard rail is a limit that code enforces, whatever the AI model says. Security
 | **Address check.** Only normal `http://` and `https://` addresses. No passwords inside the address. Not the tool's own parts (Langflow, backend, scanner service, ZAP). Not cloud "metadata" addresses | Pointing the scanners at the tool itself or at internal cloud services | Automated tests, 9 bad addresses |
 | **The target is fixed when you tick the box.** The scanner service reads it from the saved check. Nothing the AI writes can change it | An AI model that is tricked into scanning a different site | By design: the tools take no address |
 | **One check at a time** | Two scans overloading one target or one laptop | Automated test |
+
+### What you control
+
+| Guard rail | What it prevents | How we know it works |
+|---|---|---|
+| **Plan review.** The Planner's plan waits for you. While it waits, the scanner service is told "not authorized" for this check | A scan you did not expect, for example a port scan you did not want | Automated tests |
+| **An approved plan is final.** The tools you approve are checked against the tool list and passed on. The Planner's AI is not asked again | The AI changing the plan after you agreed to it | By design; automated test |
+| **Your changes are on the record.** Who reviewed the plan, what was added and what was removed are saved and printed on the report | A report that hides how the check was set up | Automated test |
+| **Stop.** "Stop after the current tool" makes the scanner service refuse every further tool for this check. The report covers what ran and names what did not | A run you cannot end | Automated tests |
 
 ### What the agents may do
 
@@ -373,8 +416,8 @@ A guard rail is a limit that code enforces, whatever the AI model says. Security
 | Guard rail | What it prevents |
 |---|---|
 | Test logins are kept in memory for the run only. They are never saved, logged or sent to the AI model | Leaked passwords |
-| The web page treats all text from scanners and scanned sites as plain text, and the server sends a strict Content-Security-Policy | A scanned site injecting scripts into your report page |
-| All published ports bind to `127.0.0.1`. ZAP and the scanner service are not published at all. The containers talk to each other with a shared secret | Someone else on your network using the tool |
+| The web page treats all text from scanners and scanned sites as plain text, and the web server sends a strict Content-Security-Policy | A scanned site injecting scripts into your report page |
+| All published ports bind to `127.0.0.1`. The backend, ZAP and the scanner service are not published at all. The web server passes on `/api/` calls only: the endpoints the containers use among themselves (`/internal/`) cannot be reached from a browser, and they need a shared secret as well | Someone else on your network using the tool |
 | Tracing is off unless you fill in the Langfuse keys | Data leaving your machine without you choosing it |
 
 ### How the report stays honest
@@ -523,33 +566,104 @@ After changing `.env`, run `docker compose up -d` again.
 
 ## 14. Project layout
 
+The project is split the way a production system is: one folder per part, one container per part, and the practice website kept away from the product code.
+
 ```
 agentic-security-assessment/
-├── docker-compose.yml        starts all five containers
+├── docker-compose.yml        starts everything; includes the practice target
 ├── .env.example              copy to .env and add your key
-├── frontend/                 the web page (index.html, styles.css, app.js)
-├── backend/
-│   ├── app/main.py           API, permission gate, starts the agent flow
-│   ├── app/db.py             saved checks and events (SQLite)
-│   ├── app/evaluation.py     the seven quality checks, Langfuse scores
-│   ├── app/report.py         Markdown and PDF reports
+│
+├── frontend/                 THE WEB PAGE (its own container, nginx)
+│   ├── Dockerfile
+│   ├── nginx.conf            serves the page, passes /api/ on to the backend
+│   └── public/
+│       ├── index.html        the page frame: header, menu, footer
+│       ├── styles.css
+│       └── js/
+│           ├── main.js           start-up, and which page to show for which address
+│           ├── api.js            the one function that calls the backend
+│           ├── ui.js             shared texts and small helpers
+│           ├── status.js         the "Ready" label at the top right
+│           └── views/            one file per page
+│               ├── new-check.js      the form
+│               ├── check.js          live progress, plan review, stop
+│               ├── report.js         the report and the comparison
+│               ├── history.js        past checks
+│               └── how-it-works.js   the explanation page
+│
+├── backend/                  THE API (its own container, FastAPI)
+│   ├── Dockerfile
+│   ├── app/
+│   │   ├── main.py           puts the app together, nothing else
+│   │   ├── config.py         settings from environment variables
+│   │   ├── schemas.py        the shapes of the request bodies
+│   │   ├── targets.py        which addresses may be scanned; practice targets
+│   │   ├── db.py             saved checks and events (SQLite)
+│   │   ├── deps.py           small helpers the routes share
+│   │   ├── routes/
+│   │   │   ├── scans.py          create, authorize, start, approve, stop, report, compare
+│   │   │   ├── system.py         status, practice targets, tool list
+│   │   │   └── internal.py       for the agents and the scanner service only
+│   │   └── services/
+│   │       ├── agents.py         starts the agent flows in Langflow
+│   │       ├── evaluation.py     the seven quality checks, Langfuse scores
+│   │       ├── report.py         Markdown and PDF
+│   │       ├── sarif.py          SARIF export
+│   │       └── compare.py        what changed since the last check
 │   └── tests/
-├── langflow/
+│
+├── langflow/                 THE AGENTS
 │   ├── components/security_agents/   the three agents and their prompts
 │   ├── agentlib/agent_common.py      shared helper: talk to the AI model
 │   ├── flows/                        the flows Langflow loads at start
 │   ├── build_flow.py                 rebuilds the flow files from the agent code
 │   └── tests/
-├── scanners/
-│   ├── app.py                run a tool, check permission, look after the target
+│
+├── scanners/                 THE SCANNER SERVICE
+│   ├── Dockerfile
+│   ├── app.py                run a tool, check permission and stop, look after the target
 │   ├── tools/                one small wrapper per scanner
 │   └── tests/
+│
+├── targets/                  PRACTICE WEBSITES (not part of the product)
+│   └── juice-shop/
+│       ├── docker-compose.yml    starts the practice shop
+│       ├── target.json           its name and address, as shown on the page
+│       └── README.md
+│
 ├── evals/                    Planner test set, runner, latest results
 └── docs/
     ├── DEMO.md               step-by-step demo with screenshots
+    ├── MARKET-COMPARISON.md  this project next to AI pen testing products
     ├── research-notes.md     what was checked before building, with sources
     └── sample-report/        a real report from the practice site
 ```
+
+**How a request travels through the code.** Take "Start the check" as the example:
+
+| Step | Where | What happens there |
+|---|---|---|
+| 1 | `frontend/public/js/views/new-check.js` | Reads the form and calls `api("/api/scans", ...)`, then `/authorize`, then `/start` |
+| 2 | `frontend/nginx.conf` | Passes the three `/api/` calls on to the backend container |
+| 3 | `backend/app/routes/scans.py` | Checks the request (is the address valid, is the box ticked, is another check running) and saves it with `db.py` |
+| 4 | `backend/app/services/agents.py` | Starts the flow in Langflow as a background job and writes the result back to the database |
+| 5 | `langflow/components/security_agents/` | The agents do their work and post progress to `routes/internal.py` |
+| 6 | `frontend/public/js/views/check.js` | Asks `/api/scans/<id>` every 2.5 seconds and redraws the page |
+
+**Where to make a change:**
+
+| I want to change | Edit |
+|---|---|
+| A text or button on a page | The matching file in `frontend/public/js/views/` |
+| Colours and layout | `frontend/public/styles.css` |
+| What an API call accepts or answers | `backend/app/routes/` and `backend/app/schemas.py` |
+| How the report looks as PDF or Markdown | `backend/app/services/report.py` |
+| A rule about which addresses may be scanned | `backend/app/targets.py` |
+| What an agent is told, or its limits | `langflow/components/security_agents/` (then rebuild the flows, see below) |
+| How a scanner is run or its output is read | `scanners/tools/<name>.py` |
+| The practice website | `targets/` |
+
+After a change to `frontend/` or `backend/`, run `docker compose up -d --build` to rebuild that container.
 
 ## 15. For developers
 
@@ -563,7 +677,7 @@ docker compose restart langflow
 
 A test fails if the flow files and the agent code drift apart.
 
-**Run the tests** (45 tests: permission gate, target validation, scanner output parsers, target care, quality checks, report formats, flow files in sync, and the Executor's guard rails):
+**Run the tests** (68 tests: permission gate, target validation, plan review, stop, comparison of two checks, SARIF, scanner output parsers, target care, quality checks, report formats, flow files in sync, and the Executor's guard rails):
 
 ```bash
 pip install -r backend/requirements.txt -r scanners/requirements.txt pytest
@@ -572,7 +686,7 @@ cd scanners && python -m pytest -q && cd ..
 python -m pytest -q langflow/tests
 ```
 
-Six of the tests exercise the agent code itself: five run the Executor with a scripted stand-in for the AI model (a model that stops early, a target that goes down, a tool outside the plan), and one covers the per-agent model setting. They need Langflow's own packages, so run them with the Langflow image:
+Eight of the tests exercise the agent code itself: seven run the Executor with a scripted stand-in for the AI model (a model that stops early, a target that goes down, a check the user stopped, a tool outside the plan), and one covers the per-agent model setting. They need Langflow's own packages, so run them with the Langflow image:
 
 ```bash
 docker run --rm -v ./langflow:/work:ro --entrypoint python langflowai/langflow:1.12.5 -m pytest -q -p no:cacheprovider /work/tests
@@ -583,9 +697,9 @@ The first group also runs on every push through GitHub Actions ([`.github/workfl
 **Use the API directly:**
 
 ```bash
-# 1. submit a target
+# 1. submit a target. "review_plan": true makes the plan wait for your approval (step 4).
 curl -X POST localhost:8000/api/scans -H "Content-Type: application/json" \
-     -d '{"target_url": "http://juice-shop:3000", "scope_notes": "Web checks only."}'
+     -d '{"target_url": "http://juice-shop:3000", "scope_notes": "Web checks only.", "review_plan": true}'
 
 # 2. confirm permission (saved with the check). Use the "id" from step 1.
 curl -X POST localhost:8000/api/scans/<id>/authorize -H "Content-Type: application/json" \
@@ -594,10 +708,20 @@ curl -X POST localhost:8000/api/scans/<id>/authorize -H "Content-Type: applicati
 # 3. start (answers 403 if step 2 was skipped)
 curl -X POST localhost:8000/api/scans/<id>/start
 
-# 4. follow progress, then fetch the report
+# 4. with review_plan: read "proposed_plan", then approve the tools you want (or stop to cancel)
 curl localhost:8000/api/scans/<id>
+curl -X POST localhost:8000/api/scans/<id>/approve -H "Content-Type: application/json" \
+     -d '{"tools": ["zap", "nuclei"]}'
+
+# 5. follow progress. To end early:  curl -X POST localhost:8000/api/scans/<id>/stop
+curl localhost:8000/api/scans/<id>
+
+# 6. fetch the report (.md, .pdf, .sarif, or no ending for JSON) and the comparison with the last check
 curl localhost:8000/api/scans/<id>/report.md
+curl localhost:8000/api/scans/<id>/compare
 ```
+
+Every endpoint is listed with its fields at http://localhost:8000/docs.
 
 **Add a scanner:** write a wrapper in `scanners/tools/` with a `SPEC` (name, description, typical duration) and a `run(target, workdir)` function that returns findings in the common shape, then register it in `scanners/tools/__init__.py`. The Planner reads the tool list at run time, so it can pick the new tool without further changes.
 
@@ -614,17 +738,19 @@ curl localhost:8000/api/scans/<id>/report.md
 - **Severity without a CVSS score is a level, not a calculation.** Nikto does not rate findings, so they are listed as Low unless they are flagged as likely false alarms.
 - **Free-tier limits.** Groq's free tier allows a limited number of requests and tokens per day. A rate-limited call is retried, then sent to the backup provider if one is set.
 - **Test logins are HTTP Basic only.** Login forms and tokens are not supported. The credentials are kept in memory for the run and are never saved, logged or sent to the AI model.
+- **Stop is not instant.** It takes effect after the tool that is running, which can be a few minutes for Nikto or Nuclei.
+- **The comparison matches findings by their ID.** A scanner that words or numbers a finding differently from one version to the next would show it as one "new" and one "no longer reported".
 - **A local, single-user demo.** One check at a time, SQLite storage, Langflow without a login, ZAP's API open inside the Docker network. All published ports bind to `127.0.0.1`. Do not put this on the internet as it is.
 - **Needs Docker and about 8 GB of memory.** ZAP's headless browser is the heavy part and is capped at 3 GB.
 
 ## 17. Future work
 
 - **Exploitation and validation** of findings in a sandbox, behind a second explicit approval, so the report can separate confirmed issues from leads. Deliberately left out of this version.
-- A human approval step between Planner and Executor: show the plan, wait for a yes.
 - Scanning behind login forms and tokens, and an active-scan profile for targets where that is permitted.
 - More tools: `testssl.sh` for TLS settings, a content discovery tool, dependency and container scanners.
 - A triage agent that cross-checks findings between tools and merges duplicates.
-- CVSS v4.0 vectors, and export to SARIF so findings load into trackers such as DefectDojo.
+- CVSS v4.0 vectors, and OWASP categories for the scanners that do not name one themselves.
+- A ready-made step for CI pipelines that runs a check and fails the build on new High findings.
 - Langfuse datasets for the Planner test set, and an evaluation set for the Reporter's advice.
 - A detection score: compare what a check finds on Juice Shop with the shop's own list of known problems.
 - A job queue for parallel checks, user accounts, and a signed permission record.

@@ -60,7 +60,16 @@ def run_tool(tool: str, request: RunRequest) -> dict:
     if not re.fullmatch(r"[0-9a-f]{32}", request.scan_id):
         raise HTTPException(400, "Invalid scan id")
 
-    target = authorized_target(request.scan_id)
+    record = authorization_record(request.scan_id)
+    if record.get("stop_requested"):
+        # The user pressed stop. Nothing is started; the Executor is told so it stops asking.
+        result = {"tool": tool, "status": "stopped", "stopped": True, "command": "", "raw_file": None,
+                  "findings": [], "target_down": False, "duration_seconds": 0,
+                  "what_it_checks": TOOLS[tool].SPEC["description"],
+                  "note": "The check was stopped by the user before this tool started."}
+        result["summary"] = summarize(result)
+        return result
+    target = authorized_target(record)
     workdir = DATA_DIR / "raw" / request.scan_id
     workdir.mkdir(parents=True, exist_ok=True)
 
@@ -100,8 +109,8 @@ def answers(target: Target, wait_seconds: int) -> bool:
             time.sleep(4)
 
 
-def authorized_target(scan_id: str) -> Target:
-    """No authorization on the scan record, no scan."""
+def authorization_record(scan_id: str) -> dict:
+    """Ask the backend about this check: is it authorized, was it stopped, and what is its target?"""
     try:
         response = httpx.get(f"{BACKEND_URL}/internal/scans/{scan_id}/authorization",
                              headers={"X-Internal-Token": INTERNAL_TOKEN}, timeout=10)
@@ -109,7 +118,11 @@ def authorized_target(scan_id: str) -> Target:
         raise HTTPException(503, f"Could not verify authorization with the backend: {exc}") from exc
     if response.status_code != 200:
         raise HTTPException(403, "Unknown scan, or the backend rejected the authorization check")
-    record = response.json()
+    return response.json()
+
+
+def authorized_target(record: dict) -> Target:
+    """No authorization on the scan record, no scan."""
     if not record.get("authorized"):
         raise HTTPException(403, "This scan has no recorded authorization; refusing to run")
     auth = record.get("basic_auth")
@@ -128,5 +141,6 @@ def summarize(result: dict) -> dict:
         "by_tool_rating": dict(ratings),
         "sample_titles": [f["title"][:90] for f in findings[:8]],
         "target_down": result["target_down"],
+        "stopped": bool(result.get("stopped")),
         "note": result.get("note", "")[:200],
     }
